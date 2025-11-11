@@ -45,6 +45,7 @@ class PackeeMainNode(Node):
         self._orders: Dict[Tuple[int, int], OrderContext] = {}
         self._pending_mtc: Deque[Tuple[int, int]] = deque()
         self._pending_mtc_keys: set[Tuple[int, int]] = set()
+        self._active_orders: set[Tuple[int, int]] = set()
         self._mtc_future: Optional[Future] = None
         self._mtc_current: Optional[Tuple[int, int]] = None
         # 디버깅을 위한 BPP 완료 로그 토글 (나중에 파라미터로 끔)
@@ -169,6 +170,10 @@ class PackeeMainNode(Node):
     def _queue_mtc_start(self, key: Tuple[int, int], force: bool = False) -> None:
         if not force and key in self._pending_mtc_keys:
             return
+        if not force and (key in self._active_orders or key == self._mtc_current):
+            return
+        if key not in self._active_orders:
+            self._active_orders.add(key)
         self._pending_mtc.append(key)
         self._pending_mtc_keys.add(key)
 
@@ -191,6 +196,7 @@ class PackeeMainNode(Node):
             self.get_logger().warn(
                 f"[PackeeMain] pending MTC start dropped (robot={key[0]} order={key[1]})"
             )
+            self._active_orders.discard(key)
             return
 
         mtc_req = PackeeMainStartMTC.Request()
@@ -209,20 +215,18 @@ class PackeeMainNode(Node):
             result = self._mtc_future.result()
             success = bool(getattr(result, "success", False))
             message = getattr(result, "message", "")
+            rid = key[0] if key else -1
+            oid = key[1] if key else -1
             if success:
-                rid = key[0] if key else -1
-                oid = key[1] if key else -1
                 self.get_logger().info(
                     f"[PackeeMain] MTC start success robot={rid} order={oid} msg={message}"
                 )
             else:
-                rid = key[0] if key else -1
-                oid = key[1] if key else -1
                 self.get_logger().warn(
                     f"[PackeeMain] MTC start failed robot={rid} order={oid} msg={message}"
                 )
                 if key:
-                    self._queue_mtc_start(key, force=True)
+                    self._active_orders.discard(key)
         except Exception as exc:  # pylint: disable=broad-except
             self.get_logger().error(f"[PackeeMain] MTC start exception: {exc}")
             if key:
@@ -282,6 +286,7 @@ class PackeeMainNode(Node):
         msg.packed_items = len(req.sequences) if req.sequences is not None else 0
         msg.message = f"[PackeeMain] MTC finish: {req.message}"
         self.pub_packing_complete.publish(msg)
+        self._active_orders.discard(key)
 
         resp.success = True
         resp.message = "[PackeeMain] finish received & packing_complete published"

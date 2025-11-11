@@ -14,7 +14,7 @@ from shopee_interfaces.srv import PackeeMainStartMTC, PackeeVisionBppStart
 
 from .pack_planner import PlannedPose, ProductSpec, plan_sequences, visualize_layout
 
-UNIT_SCALE = 0.01  # convert mm dimensions to meters
+UNIT_SCALE = 0.001  # mm dimensions scaled down by an extra 0.1 factor for Packee
 
 
 @dataclass

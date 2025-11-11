@@ -15,12 +15,12 @@ _NEW_PACKER = None
 _OPEN_FIGURES: List["matplotlib.figure.Figure"] = []
 _DEFAULT_RY = 1.5707
 _ROTATE_Z_90 = 1.5707
-_GRIPPER_LIMIT = 50
+_GRIPPER_LIMIT = 39
 _BIN_LENGTH = 170.0
-_BIN_WIDTH = 170.0
+_BIN_WIDTH = 200.0
 # margins are expressed in the same units as product specs (e.g., cm)
-_MARGIN_X = 25.0  # 0.25 m after scaling
-_MARGIN_Y = 30.0  # 0.30 m after scaling
+_MARGIN_X = 10.0  # 0.25 m after scaling
+_MARGIN_Y = 10.0  # 0.30 m after scaling
 
 
 @dataclass(frozen=True)
