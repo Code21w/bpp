@@ -187,7 +187,7 @@ class BppOrchestrator(Node):
         for seq in self._pending_sequences[:20]:
             self.get_logger().info(
                 f"  bin={bin_lookup.get(seq.seq, 0)} seq={seq.seq:02d} id={seq.id} "
-                f"pos=({seq.x:.1f}, {seq.y:.1f}, {seq.z:.1f}) "
+                f"pos=({seq.x:.3f}, {seq.y:.3f}, {seq.z:.3f}) "
                 f"rot=({seq.rx:.2f}, {seq.ry:.2f}, {seq.rz:.2f})"
             )
         self._pending_sequences = None

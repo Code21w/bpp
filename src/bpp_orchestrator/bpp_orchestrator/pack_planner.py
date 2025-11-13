@@ -16,11 +16,14 @@ _OPEN_FIGURES: List["matplotlib.figure.Figure"] = []
 _DEFAULT_RY = 1.5707
 _ROTATE_Z_90 = 1.5707
 _GRIPPER_LIMIT = 39
-_BIN_LENGTH = 170.0
-_BIN_WIDTH = 200.0
+_BIN_LENGTH = 200.0
+_BIN_WIDTH = 160.0
 # margins are expressed in the same units as product specs (e.g., cm)
-_MARGIN_X = 10.0  # 0.25 m after scaling
-_MARGIN_Y = 10.0  # 0.30 m after scaling
+_MARGIN_X = 15  # 0.25 m after scaling
+_MARGIN_Y = 15  # 0.30 m after scaling
+_ITEM_MARGIN = 7.5 # clearance per side to keep around every product footprint
+_MAX_CENTER_Z = 29.0  # mm center height limit for placements
+_MAX_PLACEMENT_HEIGHT = _MAX_CENTER_Z * 2.0
 
 
 @dataclass(frozen=True)
@@ -163,7 +166,9 @@ def _plan_with_rectpack(
         packer = new_packer(rotation=False)
         for rid in remaining:
             inst = instances[rid]
-            packer.add_rect(int(inst.length), int(inst.width), rid=rid)
+            pack_length = int(round(inst.length + 2 * _ITEM_MARGIN))
+            pack_width = int(round(inst.width + 2 * _ITEM_MARGIN))
+            packer.add_rect(pack_length, pack_width, rid=rid)
 
         packer.add_bin(int(bin_length_eff), int(bin_width_eff))
         packer.pack()
@@ -177,10 +182,10 @@ def _plan_with_rectpack(
                 Placement(
                     bin_index=bin_index,
                     instance=inst,
-                    x=float(x) + _MARGIN_X,
-                    y=float(y) + _MARGIN_Y,
-                    w=float(w),
-                    h=float(h),
+                    x=float(x) + _MARGIN_X + _ITEM_MARGIN,
+                    y=float(y) + _MARGIN_Y + _ITEM_MARGIN,
+                    w=float(inst.length),
+                    h=float(inst.width),
                 )
             )
             placed_this_bin.add(rid)
@@ -214,22 +219,25 @@ def _plan_with_grid(
     bin_index = 0
 
     for inst in instances:
-        if inst.length > bin_length_eff or inst.width > bin_width_eff:
+        eff_length = float(inst.length) + 2.0 * _ITEM_MARGIN
+        eff_width = float(inst.width) + 2.0 * _ITEM_MARGIN
+
+        if eff_length > bin_length_eff or eff_width > bin_width_eff:
             LOGGER.warning(
                 "제품 %d가 bin 유효 영역(%.1fx%.1f)을 초과합니다. 길이=%.1f 너비=%.1f",
                 inst.product_id,
                 bin_length_eff,
                 bin_width_eff,
-                float(inst.length),
-                float(inst.width),
+                eff_length,
+                eff_width,
             )
 
-        if cursor_x + inst.length > bin_length_eff:
+        if cursor_x + eff_length > bin_length_eff:
             cursor_x = 0.0
             cursor_y += row_height
             row_height = 0.0
 
-        if cursor_y + inst.width > bin_width_eff:
+        if cursor_y + eff_width > bin_width_eff:
             bin_index += 1
             cursor_x = 0.0
             cursor_y = 0.0
@@ -239,14 +247,14 @@ def _plan_with_grid(
             Placement(
                 bin_index=bin_index,
                 instance=inst,
-                x=float(cursor_x) + _MARGIN_X,
-                y=float(cursor_y) + _MARGIN_Y,
+                x=float(cursor_x) + _MARGIN_X + _ITEM_MARGIN,
+                y=float(cursor_y) + _MARGIN_Y + _ITEM_MARGIN,
                 w=float(inst.length),
                 h=float(inst.width),
             )
         )
-        cursor_x += inst.length
-        row_height = max(row_height, float(inst.width))
+        cursor_x += eff_length
+        row_height = max(row_height, eff_width)
 
     placements.sort(key=lambda data: (data.bin_index, data.y, data.x))
     return placements, bin_length, bin_width, bin_index + 1
@@ -266,7 +274,7 @@ def _orient_product(spec: ProductSpec) -> Tuple[int, int, int]:
         max(spec.width, 1),
         max(spec.height, 1),
     ]
-    orientations: List[Tuple[Tuple[int, int, int], int, int, int]] = []
+    orientations: List[Tuple[Tuple[int, int, int], int, int, int, int]] = []
     eff_length, eff_width = _bin_dimensions(effective=True)
     for idx, vertical in enumerate(dims):
         horizontal = [dims[j] for j in range(3) if j != idx]
@@ -274,18 +282,27 @@ def _orient_product(spec: ProductSpec) -> Tuple[int, int, int]:
             length, width = top
             fits_gripper = min(length, width) <= _GRIPPER_LIMIT
             fits_bin = length <= eff_length and width <= eff_width
+            within_height = vertical <= _MAX_PLACEMENT_HEIGHT
             orientations.append(
                 (
                     (length, width, vertical),
+                    0 if within_height else 1,
                     0 if fits_gripper else 1,
                     0 if fits_bin else 1,
                     length * width,
                 )
             )
 
-    orientations.sort(key=lambda item: (item[1], item[2], item[3]))
-    best, gripper_penalty, bin_penalty, _ = orientations[0]
+    orientations.sort(key=lambda item: (item[1], item[2], item[3], item[4]))
+    best, height_penalty, gripper_penalty, bin_penalty, _ = orientations[0]
 
+    if height_penalty:
+        LOGGER.warning(
+            "제품 %d을 높이 한계 %.1f(단위) 이하로 배치할 수 없습니다. 선택된 높이=%.1f",
+            spec.product_id,
+            _MAX_PLACEMENT_HEIGHT,
+            best[2],
+        )
     if gripper_penalty:
         LOGGER.warning(
             "제품 %d에서 그리퍼 제약(<=%d)을 만족하는 면을 찾지 못했습니다. 가장 작은 면을 사용합니다.",
